@@ -112,7 +112,6 @@ impl Heap {
     }
 
     fn prune(&mut self, node: Rc<Node>) {
-        println!("Called prune on {}", *node.key.borrow());
         let parent = if let Some(ref parent) = *node.parent.borrow() {
             Weak::upgrade(parent)
         } else {
@@ -120,7 +119,6 @@ impl Heap {
         };
 
         if let Some(parent) = parent {
-            println!("parent: {}", *parent.key.borrow());
             if *parent.key.borrow() < *node.key.borrow() {
                 return;
             }
@@ -132,21 +130,15 @@ impl Heap {
             };
 
             if let Some(child) = child {
-                println!("child exists");
                 if Rc::ptr_eq(&child, &node) {
-                    println!("node {} is child", *node.key.borrow());
                     if *parent.rank.borrow() > 1 {
-                        println!("rank is > 1");
                         if let Some(ref left) = *node.left.borrow() {
-                            println!("Setting child to node's left");
                             parent.set_child(Rc::clone(left));
                         }
                     } else {
-                        println!("rank <= 1");
                         parent.clear_child();
                     }
                 } else {
-                    println!("node {} is child", *child.key.borrow());
                 }
 
                 let min = if let Some(ref min) = self.min {
