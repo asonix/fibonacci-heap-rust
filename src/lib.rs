@@ -21,16 +21,17 @@ impl Heap {
         }
     }
 
-    pub fn insert(&mut self, key: i32) {
+    pub fn insert(&mut self, key: i32) -> Weak<Node> {
         self.n += 1;
         self.trees += 1;
 
         let tmp_node = Node::new(key);
+        let ret_node = Rc::downgrade(&tmp_node);
 
         self.min = if let Some(ref min) = self.min {
             Node::concatenate(Rc::clone(min), Rc::clone(&tmp_node));
 
-            if tmp_node.key < min.key {
+            if *tmp_node.key.borrow() < *min.key.borrow() {
                 Some(tmp_node)
             } else {
                 Some(Rc::clone(min))
@@ -38,6 +39,8 @@ impl Heap {
         } else {
             Some(tmp_node)
         };
+
+        return ret_node;
     }
 
     pub fn delete_min(&mut self) {
@@ -99,11 +102,81 @@ impl Heap {
             }
         }
     }
+
+    pub fn reduce_key(&mut self, node: Rc<Node>, key: i32) {
+        if key < *node.key.borrow() {
+            node.set_key(key);
+
+            self.prune(node);
+        }
+    }
+
+    fn prune(&mut self, node: Rc<Node>) {
+        println!("Called prune on {}", *node.key.borrow());
+        let parent = if let Some(ref parent) = *node.parent.borrow() {
+            Weak::upgrade(parent)
+        } else {
+            None
+        };
+
+        if let Some(parent) = parent {
+            println!("parent: {}", *parent.key.borrow());
+            if *parent.key.borrow() < *node.key.borrow() {
+                return;
+            }
+
+            let child = if let Some(ref child) = *parent.child.borrow() {
+                Some(Rc::clone(child))
+            } else {
+                None
+            };
+
+            if let Some(child) = child {
+                println!("child exists");
+                if Rc::ptr_eq(&child, &node) {
+                    println!("node {} is child", *node.key.borrow());
+                    if *parent.rank.borrow() > 1 {
+                        println!("rank is > 1");
+                        if let Some(ref left) = *node.left.borrow() {
+                            println!("Setting child to node's left");
+                            parent.set_child(Rc::clone(left));
+                        }
+                    } else {
+                        println!("rank <= 1");
+                        parent.clear_child();
+                    }
+                } else {
+                    println!("node {} is child", *child.key.borrow());
+                }
+
+                let min = if let Some(ref min) = self.min {
+                    Some(Rc::clone(min))
+                } else {
+                    None
+                };
+
+                if let Some(min) = min {
+                    Node::concatenate(Rc::clone(&min), Node::remove(Rc::clone(&node)));
+
+                    if *node.key.borrow() < *min.key.borrow() {
+                        self.min = Some(node);
+                    }
+
+                    if parent.is_marked() {
+                        self.prune(parent);
+                    } else {
+                        parent.mark();
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub struct Node {
-    key: i32,
+    key: RefCell<i32>,
     rank: RefCell<usize>,
+    marked: RefCell<bool>,
     left: RefCell<Option<Rc<Node>>>,
     right: RefCell<Option<Weak<Node>>>,
     parent: RefCell<Option<Weak<Node>>>,
@@ -113,8 +186,9 @@ pub struct Node {
 impl Node {
     fn new(key: i32) -> Rc<Self> {
         let node = Rc::new(Node {
-            key: key,
+            key: RefCell::new(key),
             rank: RefCell::new(0),
+            marked: RefCell::new(false),
             left: RefCell::new(None),
             right: RefCell::new(None),
             parent: RefCell::new(None),
@@ -127,20 +201,36 @@ impl Node {
         node
     }
 
-    pub fn increment_rank(&self) {
+    fn set_key(&self, key: i32) {
+        *self.key.borrow_mut() = key;
+    }
+
+    fn is_marked(&self) -> bool {
+        *self.marked.borrow()
+    }
+
+    fn mark(&self) {
+        *self.marked.borrow_mut() = true;
+    }
+
+    fn increment_rank(&self) {
         *self.rank.borrow_mut() += 1;
     }
 
-    pub fn decrement_rank(&self) {
+    fn decrement_rank(&self) {
         *self.rank.borrow_mut() -= 1;
     }
 
-    pub fn print(&self, depth: i32) {
+    fn print(&self, depth: i32) {
         let mut s = String::new();
         for _ in 0..depth {
             s.push_str("  ");
         }
-        println!("{}{}:", s, self.key);
+        if self.is_marked() {
+            println!("{}{}*:", s, *self.key.borrow());
+        } else {
+            println!("{}{}:", s, *self.key.borrow());
+        }
 
         if let Some(ref child) = *self.child.borrow() {
             for node in NodeIterator::new(Rc::clone(child)) {
@@ -149,7 +239,7 @@ impl Node {
         }
     }
 
-    pub fn remove(node: Rc<Node>) {
+    fn remove(node: Rc<Node>) -> Rc<Node> {
         let left = match *node.left.borrow() {
             Some(ref left) => Rc::clone(left),
             None => unreachable!(),
@@ -170,9 +260,11 @@ impl Node {
 
         node.set_left(Rc::clone(&node));
         node.set_right(Rc::downgrade(&node));
+
+        node
     }
 
-    pub fn cleanup(node: Rc<Self>) {
+    fn cleanup(node: Rc<Self>) {
         let n2 = Rc::clone(&node);
         Node::remove(n2);
 
@@ -181,15 +273,19 @@ impl Node {
             None => unreachable!(),
         };
 
-        if let Some(ref parent) = *node.parent.borrow() {
-            if let Some(parent) = Weak::upgrade(parent) {
-                if let Some(ref child) = *parent.child.borrow() {
-                    if Rc::ptr_eq(&node, child) {
-                        if Rc::ptr_eq(&node, &left) {
-                            parent.clear_child();
-                        } else {
-                            parent.set_child(left);
-                        }
+        let parent = if let Some(ref parent) = *node.parent.borrow() {
+            Weak::upgrade(parent)
+        } else {
+            None
+        }
+
+        if let Some(parent) = parent {
+            if let Some(ref child) = *parent.child.borrow() {
+                if Rc::ptr_eq(&node, child) {
+                    if Rc::ptr_eq(&node, &left) {
+                        parent.clear_child();
+                    } else {
+                        parent.set_child(left);
                     }
                 }
             }
@@ -263,7 +359,11 @@ impl Node {
         };
 
         if let Some(parent) = n2parent {
-            parent.clear_child();
+            if let Some(ref child) = *parent.child.borrow() {
+                if Rc::ptr_eq(&node2, child) {
+                    parent.clear_child();
+                }
+            }
         }
 
         let n1parent = if let Some(ref parent) = *node1.parent.borrow() {
@@ -289,7 +389,7 @@ impl Node {
         let mut min_node = Rc::clone(&node);
 
         for node in NodeIterator::new(node) {
-            if node.key < min_node.key {
+            if *node.key.borrow() < *min_node.key.borrow() {
                 min_node = Rc::clone(&node);
             }
         }
@@ -305,7 +405,7 @@ pub struct NodeConsolidator {
 }
 
 impl NodeConsolidator {
-    pub fn new(trees: usize) -> Self {
+    fn new(trees: usize) -> Self {
         NodeConsolidator {
             trees: trees,
             rank: 0,
@@ -313,7 +413,7 @@ impl NodeConsolidator {
         }
     }
 
-    pub fn consolidate(&mut self, node: Rc<Node>) {
+    fn consolidate(&mut self, node: Rc<Node>) {
         if self.ranks.len() == self.trees {
             return;
         }
@@ -336,7 +436,7 @@ impl NodeConsolidator {
         };
 
         if let Some(ranked_node) = ranked_node {
-            let node = if node.key < ranked_node.key {
+            let node = if *node.key.borrow() < *ranked_node.key.borrow() {
                 self.merge_nodes(node2, ranked_node)
             } else {
                 self.merge_nodes(ranked_node, node2)
@@ -380,6 +480,7 @@ impl NodeConsolidator {
         if let Some(child) = child {
             Node::concatenate(child, greater_node);
         } else {
+            greater_node.set_parent(Rc::downgrade(&lesser_node));
             lesser_node.set_child(greater_node);
         }
 
@@ -403,7 +504,7 @@ pub struct NodeIterator {
 }
 
 impl NodeIterator {
-    pub fn new(node: Rc<Node>) -> Self {
+    fn new(node: Rc<Node>) -> Self {
         NodeIterator {
             first: Rc::clone(&node),
             current: Some(Rc::clone(&node)),
@@ -411,7 +512,7 @@ impl NodeIterator {
         }
     }
 
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.current = Some(Rc::clone(&self.first));
         self.first_seen = false;
     }
