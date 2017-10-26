@@ -2,15 +2,15 @@ use std::collections::HashMap;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-pub struct Heap {
+pub struct Heap<T> {
     n: i32,
     rank: usize,
     trees: usize,
     marks: i32,
-    min: Option<Rc<Node>>,
+    min: Option<Rc<Node<T>>>,
 }
 
-impl Heap {
+impl<T> Heap<T> {
     pub fn new() -> Self {
         Heap {
             n: 0,
@@ -21,11 +21,11 @@ impl Heap {
         }
     }
 
-    pub fn insert(&mut self, key: i32) -> Weak<Node> {
+    pub fn insert(&mut self, key: i32, value: T) -> Weak<Node<T>> {
         self.n += 1;
         self.trees += 1;
 
-        let tmp_node = Node::new(key);
+        let tmp_node = Node::new(key, value);
         let ret_node = Rc::downgrade(&tmp_node);
 
         self.min = if let Some(ref min) = self.min {
@@ -103,7 +103,7 @@ impl Heap {
         }
     }
 
-    pub fn reduce_key(&mut self, node: Rc<Node>, key: i32) {
+    pub fn reduce_key(&mut self, node: Rc<Node<T>>, key: i32) {
         if key < *node.key.borrow() {
             node.set_key(key);
 
@@ -111,7 +111,7 @@ impl Heap {
         }
     }
 
-    fn prune(&mut self, node: Rc<Node>) {
+    fn prune(&mut self, node: Rc<Node<T>>) {
         let parent = if let Some(ref parent) = *node.parent.borrow() {
             Weak::upgrade(parent)
         } else {
@@ -145,6 +145,8 @@ impl Heap {
                     }
                 }
 
+                parent.decrement_rank();
+
                 let min = if let Some(ref min) = self.min {
                     Some(Rc::clone(min))
                 } else {
@@ -153,6 +155,7 @@ impl Heap {
 
                 if let Some(min) = min {
                     Node::concatenate(Rc::clone(&min), Node::remove(Rc::clone(&node)));
+                    self.trees += 1;
 
                     if *node.key.borrow() < *min.key.borrow() {
                         self.min = Some(node);
@@ -170,20 +173,22 @@ impl Heap {
     }
 }
 
-pub struct Node {
+pub struct Node<T> {
     key: RefCell<i32>,
+    value: T,
     rank: RefCell<usize>,
     marked: RefCell<bool>,
-    left: RefCell<Option<Rc<Node>>>,
-    right: RefCell<Option<Weak<Node>>>,
-    parent: RefCell<Option<Weak<Node>>>,
-    child: RefCell<Option<Rc<Node>>>,
+    left: RefCell<Option<Rc<Node<T>>>>,
+    right: RefCell<Option<Weak<Node<T>>>>,
+    parent: RefCell<Option<Weak<Node<T>>>>,
+    child: RefCell<Option<Rc<Node<T>>>>,
 }
 
-impl Node {
-    fn new(key: i32) -> Rc<Self> {
+impl<T> Node<T> {
+    fn new(key: i32, value: T) -> Rc<Self> {
         let node = Rc::new(Node {
             key: RefCell::new(key),
+            value: value,
             rank: RefCell::new(0),
             marked: RefCell::new(false),
             left: RefCell::new(None),
@@ -196,6 +201,10 @@ impl Node {
         node.set_right(Rc::downgrade(&node));
 
         node
+    }
+
+    pub fn get_value(self) -> T {
+        self.value
     }
 
     fn set_key(&self, key: i32) {
@@ -240,7 +249,7 @@ impl Node {
         }
     }
 
-    fn remove(node: Rc<Node>) -> Rc<Node> {
+    fn remove(node: Rc<Node<T>>) -> Rc<Node<T>> {
         let left = match *node.left.borrow() {
             Some(ref left) => Rc::clone(left),
             None => unreachable!(),
@@ -399,13 +408,13 @@ impl Node {
     }
 }
 
-pub struct NodeConsolidator {
+pub struct NodeConsolidator<T> {
     trees: usize,
     rank: usize,
-    ranks: HashMap<usize, Rc<Node>>,
+    ranks: HashMap<usize, Rc<Node<T>>>,
 }
 
-impl NodeConsolidator {
+impl<T> NodeConsolidator<T> {
     fn new(trees: usize) -> Self {
         NodeConsolidator {
             trees: trees,
@@ -414,7 +423,7 @@ impl NodeConsolidator {
         }
     }
 
-    fn consolidate(&mut self, node: Rc<Node>) {
+    fn consolidate(&mut self, node: Rc<Node<T>>) {
         if self.ranks.len() == self.trees {
             return;
         }
@@ -459,7 +468,7 @@ impl NodeConsolidator {
         }
     }
 
-    fn merge_nodes(&mut self, lesser_node: Rc<Node>, greater_node: Rc<Node>) -> Rc<Node> {
+    fn merge_nodes(&mut self, lesser_node: Rc<Node<T>>, greater_node: Rc<Node<T>>) -> Rc<Node<T>> {
         // println!("Making {} child of {}", greater_node.key, lesser_node.key);
         self.trees -= 1;
 
@@ -498,29 +507,24 @@ impl NodeConsolidator {
     }
 }
 
-pub struct NodeIterator {
-    first: Rc<Node>,
-    current: Option<Rc<Node>>,
+pub struct NodeIterator<T> {
+    first: Rc<Node<T>>,
+    current: Option<Rc<Node<T>>>,
     first_seen: bool,
 }
 
-impl NodeIterator {
-    fn new(node: Rc<Node>) -> Self {
+impl<T> NodeIterator<T> {
+    fn new(node: Rc<Node<T>>) -> Self {
         NodeIterator {
             first: Rc::clone(&node),
             current: Some(Rc::clone(&node)),
             first_seen: false,
         }
     }
-
-    fn reset(&mut self) {
-        self.current = Some(Rc::clone(&self.first));
-        self.first_seen = false;
-    }
 }
 
-impl Iterator for NodeIterator {
-    type Item = Rc<Node>;
+impl<T> Iterator for NodeIterator<T> {
+    type Item = Rc<Node<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let current = match self.current {

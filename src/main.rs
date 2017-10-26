@@ -10,7 +10,7 @@ fn main() {
     println!();
 
     println!("initial:");
-    let v: Vec<_> = (1..9).map(|i| heap.insert(i)).collect();
+    let v: Vec<_> = (1..9).map(|i| heap.insert(i, i)).collect();
 
     heap.print();
     println!();
@@ -26,6 +26,11 @@ fn main() {
         heap.print();
         println!();
     }
+
+    println!("delete_min:");
+    heap.delete_min();
+    heap.print();
+    println!();
 
     /*
 
