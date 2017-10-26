@@ -123,6 +123,11 @@ impl Heap {
                 return;
             }
 
+            if node.is_marked() {
+                node.unmark();
+                self.marks -= 1;
+            }
+
             let child = if let Some(ref child) = *parent.child.borrow() {
                 Some(Rc::clone(child))
             } else {
@@ -138,7 +143,6 @@ impl Heap {
                     } else {
                         parent.clear_child();
                     }
-                } else {
                 }
 
                 let min = if let Some(ref min) = self.min {
@@ -157,6 +161,7 @@ impl Heap {
                     if parent.is_marked() {
                         self.prune(parent);
                     } else {
+                        self.marks += 1;
                         parent.mark();
                     }
                 }
@@ -203,6 +208,10 @@ impl Node {
 
     fn mark(&self) {
         *self.marked.borrow_mut() = true;
+    }
+
+    fn unmark(&self) {
+        *self.marked.borrow_mut() = false;
     }
 
     fn increment_rank(&self) {
@@ -269,7 +278,7 @@ impl Node {
             Weak::upgrade(parent)
         } else {
             None
-        }
+        };
 
         if let Some(parent) = parent {
             if let Some(ref child) = *parent.child.borrow() {
