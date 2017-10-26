@@ -60,7 +60,9 @@ impl<T> Heap<T> {
                 None => None,
             };
 
-            Node::cleanup(Rc::clone(&min));
+            Node::remove(Rc::clone(&min));
+            min.clear_child();
+            min.clear_left();
 
             if let Some(child) = child {
                 if !Rc::ptr_eq(&left, &min) {
@@ -108,6 +110,38 @@ impl<T> Heap<T> {
             node.set_key(key);
 
             self.prune(node);
+        }
+    }
+
+    pub fn delete(&mut self, node: Rc<Node<T>>) {
+        self.reduce_key(node, i32::min_value());
+        self.delete_min();
+    }
+
+    pub fn union(&mut self, mut heap: Heap<T>) {
+        let foreign_min = if let Some(ref min) = heap.min {
+            Some(Rc::clone(min))
+        } else {
+            None
+        };
+
+        let local_min = if let Some(ref min) = self.min {
+            Some(Rc::clone(min))
+        } else {
+            None
+        };
+
+        if let Some(f_min) = foreign_min {
+            if let Some(l_min) = local_min {
+                if *f_min.key.borrow() < *l_min.key.borrow() {
+                    self.min = Some(Rc::clone(&f_min));
+                }
+
+                Node::concatenate(l_min, f_min);
+            } else {
+                self.min = Some(f_min);
+            }
+            heap.min = None
         }
     }
 
@@ -173,6 +207,22 @@ impl<T> Heap<T> {
     }
 }
 
+impl<T> Drop for Heap<T> {
+    fn drop(&mut self) {
+        let min = if let Some(ref min) = self.min {
+            Some(Rc::clone(min))
+        } else {
+            None
+        };
+
+        if let Some(min) = min {
+            for node in NodeIterator::new(min) {
+                Node::cleanup(node);
+            }
+        }
+    }
+}
+
 pub struct Node<T> {
     key: RefCell<i32>,
     value: T,
@@ -205,6 +255,10 @@ impl<T> Node<T> {
 
     pub fn get_value(self) -> T {
         self.value
+    }
+
+    pub fn get_key(&self) -> i32 {
+        *self.key.borrow()
     }
 
     fn set_key(&self, key: i32) {
@@ -268,21 +322,6 @@ impl<T> Node<T> {
             }
         }
 
-        node.set_left(Rc::clone(&node));
-        node.set_right(Rc::downgrade(&node));
-
-        node
-    }
-
-    fn cleanup(node: Rc<Self>) {
-        let n2 = Rc::clone(&node);
-        Node::remove(n2);
-
-        let left = match *node.left.borrow() {
-            Some(ref left) => Rc::clone(left),
-            None => unreachable!(),
-        };
-
         let parent = if let Some(ref parent) = *node.parent.borrow() {
             Weak::upgrade(parent)
         } else {
@@ -301,41 +340,50 @@ impl<T> Node<T> {
             }
         }
 
+        node.set_left(Rc::clone(&node));
+        node.set_right(Rc::downgrade(&node));
+
+        node
+    }
+
+    fn cleanup(node: Rc<Self>) {
+        let child = if let Some(ref child) = *node.child.borrow() {
+            Some(Rc::clone(child))
+        } else {
+            None
+        };
+
+        if let Some(child) = child {
+            for node in NodeIterator::new(child) {
+                Node::cleanup(node);
+            }
+        }
+
         node.clear_left();
-        node.clear_right();
-        node.clear_parent();
         node.clear_child();
     }
 
-    pub fn set_left(&self, node: Rc<Self>) {
+    fn set_left(&self, node: Rc<Self>) {
         *self.left.borrow_mut() = Some(node);
     }
 
-    pub fn clear_left(&self) {
+    fn clear_left(&self) {
         *self.left.borrow_mut() = None;
     }
 
-    pub fn set_right(&self, node: Weak<Self>) {
+    fn set_right(&self, node: Weak<Self>) {
         *self.right.borrow_mut() = Some(node);
     }
 
-    pub fn clear_right(&self) {
-        *self.right.borrow_mut() = None;
-    }
-
-    pub fn set_parent(&self, node: Weak<Self>) {
+    fn set_parent(&self, node: Weak<Self>) {
         *self.parent.borrow_mut() = Some(node);
     }
 
-    pub fn clear_parent(&self) {
-        *self.parent.borrow_mut() = None;
-    }
-
-    pub fn set_child(&self, node: Rc<Self>) {
+    fn set_child(&self, node: Rc<Self>) {
         *self.child.borrow_mut() = Some(node);
     }
 
-    pub fn clear_child(&self) {
+    fn clear_child(&self) {
         *self.child.borrow_mut() = None;
     }
 
@@ -351,16 +399,6 @@ impl<T> Node<T> {
             Some(ref left) => Rc::clone(left),
             None => unreachable!(),
         };
-
-        /*
-        println!(
-            "Placing {} to {} between {} and {}",
-            node2.key,
-            node2_left.key,
-            node1_left.key,
-            node1.key
-        );
-        */
 
         let n2parent = if let Some(ref parent) = *node2.parent.borrow() {
             Weak::upgrade(parent)
@@ -538,8 +576,8 @@ impl<T> Iterator for NodeIterator<T> {
             self.first_seen = true;
         }
 
-        if let Some(ref right) = *current.right.borrow() {
-            self.current = Weak::upgrade(right);
+        if let Some(ref left) = *current.left.borrow() {
+            self.current = Some(Rc::clone(left));
         } else {
             self.current = None;
         }

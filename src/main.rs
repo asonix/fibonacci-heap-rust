@@ -1,16 +1,16 @@
 extern crate fibonacci_heap;
 
 use std::rc::Weak;
-use fibonacci_heap::Heap;
+use fibonacci_heap::{Heap, Node};
 
-fn main() {
+fn heap_stuff() -> Vec<Weak<Node<i32>>> {
     println!("creating:");
     let mut heap = Heap::new();
     heap.print();
     println!();
 
     println!("initial:");
-    let v: Vec<_> = (1..9).map(|i| heap.insert(i, i)).collect();
+    let v: Vec<_> = (1..17).map(|i| heap.insert(i, i)).collect();
 
     heap.print();
     println!();
@@ -32,14 +32,23 @@ fn main() {
     heap.print();
     println!();
 
-    /*
-
-    for _ in 1..17 {
-        println!("delete_min:");
-        heap.delete_min();
+    if let Some(n) = Weak::upgrade(&v[7]) {
+        println!("delete {}:", n.get_key());
+        heap.delete(n);
         heap.print();
         println!();
     }
 
-    */
+    v
+}
+
+fn main() {
+    let v = heap_stuff();
+
+    for (i, node) in v.iter().enumerate() {
+        if let Some(node) = Weak::upgrade(&node) {
+            println!("Failed to delete {}, index: {}", node.get_key(), i);
+        }
+    }
+
 }
