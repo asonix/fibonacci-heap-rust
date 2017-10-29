@@ -95,7 +95,19 @@ impl<T> Heap<T> {
         if key < node.get_key() {
             node.set_key(key);
 
-            self.prune(node);
+            if let Some(parent) = node.get_parent() {
+                if parent.get_key() < node.get_key() {
+                    return;
+                }
+            }
+
+            let root = self.get_min().unwrap();
+
+            if node.get_key() < root.get_key() {
+                self.min = Some(Rc::clone(&node));
+            }
+
+            self.prune(node, root);
         }
     }
 
@@ -119,14 +131,9 @@ impl<T> Heap<T> {
         }
     }
 
-    fn prune(&mut self, node: Rc<Node<T>>) -> Option<()> {
+    fn prune(&mut self, node: Rc<Node<T>>, root: Rc<Node<T>>) -> Option<()> {
         let parent = node.get_parent()?;
-
-        if parent.get_key() < node.get_key() {
-            return None;
-        }
-
-        let child = parent.get_child()?;
+        let child = parent.get_child().unwrap();
 
         if node.is_marked() {
             node.unmark();
@@ -145,20 +152,14 @@ impl<T> Heap<T> {
 
         parent.decrement_rank();
 
-        if let Some(min) = self.get_min() {
-            Node::concatenate(Rc::clone(&min), Node::remove(Rc::clone(&node)));
-            self.trees += 1;
+        Node::concatenate(Rc::clone(&root), Node::remove(Rc::clone(&node)));
+        self.trees += 1;
 
-            if node.get_key() < min.get_key() {
-                self.min = Some(node);
-            }
-
-            if parent.is_marked() {
-                self.prune(parent);
-            } else {
-                self.marks += 1;
-                parent.mark();
-            }
+        if parent.is_marked() {
+            self.prune(parent, root);
+        } else if parent.get_parent().is_some() {
+            self.marks += 1;
+            parent.mark();
         }
 
         Some(())
