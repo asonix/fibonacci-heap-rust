@@ -39,6 +39,13 @@ fn heap_stuff() -> Vec<Weak<Node<i32>>> {
         println!();
     }
 
+    if let Some(n) = Weak::upgrade(&v[6]) {
+        println!("delete {}:", n.get_key());
+        heap.delete(n);
+        heap.print();
+        println!();
+    }
+
     v
 }
 
@@ -50,5 +57,4 @@ fn main() {
             println!("Failed to delete {}, index: {}", node.get_key(), i);
         }
     }
-
 }
