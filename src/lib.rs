@@ -44,27 +44,23 @@ impl<T> Heap<T> {
             Some(tmp_node)
         };
 
-        return ret_node;
+        ret_node
     }
 
     pub fn delete_min(&mut self) {
-        self.min = if let Some(min) = self.get_min() {
+        if let Some(min) = self.get_min() {
             self.n -= 1;
             self.trees -= 1;
             self.trees += min.get_rank();
 
-            let left = match min.get_left() {
-                Some(left) => left,
-                None => unreachable!(),
-            };
-
+            let left = min.get_left().unwrap();
             let child = min.get_child();
 
             Node::remove(Rc::clone(&min));
             min.clear_child();
             min.clear_left();
 
-            if let Some(child) = child {
+            self.min = if let Some(child) = child {
                 if !Rc::ptr_eq(&left, &min) {
                     Node::concatenate(left, Rc::clone(&child));
                 }
@@ -76,10 +72,8 @@ impl<T> Heap<T> {
                 } else {
                     None
                 }
-            }
-        } else {
-            None
-        };
+            };
+        }
 
         if let Some(min) = self.get_min() {
             let mut nc = NodeConsolidator::new(self.trees);
@@ -125,47 +119,49 @@ impl<T> Heap<T> {
         }
     }
 
-    fn prune(&mut self, node: Rc<Node<T>>) {
-        if let Some(parent) = node.get_parent() {
-            if parent.get_key() < node.get_key() {
-                return;
-            }
+    fn prune(&mut self, node: Rc<Node<T>>) -> Option<()> {
+        let parent = node.get_parent()?;
 
-            if node.is_marked() {
-                node.unmark();
-                self.marks -= 1;
-            }
+        if parent.get_key() < node.get_key() {
+            return None;
+        }
 
-            if let Some(child) = parent.get_child() {
-                if Rc::ptr_eq(&child, &node) {
-                    if parent.get_rank() > 1 {
-                        if let Some(left) = node.get_left() {
-                            parent.set_child(left);
-                        }
-                    } else {
-                        parent.clear_child();
-                    }
+        let child = parent.get_child()?;
+
+        if node.is_marked() {
+            node.unmark();
+            self.marks -= 1;
+        }
+
+        if Rc::ptr_eq(&child, &node) {
+            if parent.get_rank() > 1 {
+                if let Some(left) = node.get_left() {
+                    parent.set_child(left);
                 }
-
-                parent.decrement_rank();
-
-                if let Some(min) = self.get_min() {
-                    Node::concatenate(Rc::clone(&min), Node::remove(Rc::clone(&node)));
-                    self.trees += 1;
-
-                    if node.get_key() < min.get_key() {
-                        self.min = Some(node);
-                    }
-
-                    if parent.is_marked() {
-                        self.prune(parent);
-                    } else {
-                        self.marks += 1;
-                        parent.mark();
-                    }
-                }
+            } else {
+                parent.clear_child();
             }
         }
+
+        parent.decrement_rank();
+
+        if let Some(min) = self.get_min() {
+            Node::concatenate(Rc::clone(&min), Node::remove(Rc::clone(&node)));
+            self.trees += 1;
+
+            if node.get_key() < min.get_key() {
+                self.min = Some(node);
+            }
+
+            if parent.is_marked() {
+                self.prune(parent);
+            } else {
+                self.marks += 1;
+                parent.mark();
+            }
+        }
+
+        Some(())
     }
 }
 
@@ -264,15 +260,8 @@ impl<T> Node<T> {
     }
 
     fn remove(node: Rc<Node<T>>) -> Rc<Node<T>> {
-        let left = match node.get_left() {
-            Some(left) => left,
-            None => unreachable!(),
-        };
-
-        let right = match node.get_right() {
-            Some(right) => right,
-            None => unreachable!(),
-        };
+        let left = node.get_left().unwrap();
+        let right = node.get_right().unwrap();
 
         if !Rc::ptr_eq(&node, &left) {
             left.set_right(Rc::downgrade(&right));
@@ -374,16 +363,8 @@ impl<T> Node<T> {
 
     fn concatenate(node1: Rc<Self>, node2: Rc<Self>) {
         let node1_weak = Rc::downgrade(&node1);
-
-        let node2_left = match node2.get_left() {
-            Some(left) => left,
-            None => unreachable!(),
-        };
-
-        let node1_left = match node1.get_left() {
-            Some(left) => left,
-            None => unreachable!(),
-        };
+        let node1_left = node1.get_left().unwrap();
+        let node2_left = node2.get_left().unwrap();
 
         if let Some(parent) = node2.get_parent() {
             if let Some(child) = parent.get_child() {
@@ -527,10 +508,7 @@ impl<T> Iterator for NodeIterator<T> {
     type Item = Rc<Node<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current = match self.current {
-            Some(ref current) => Rc::clone(current),
-            None => return None,
-        };
+        let current = Node::from_borrowed_option_rc(&self.current)?;
 
         if self.first_seen && Rc::ptr_eq(&current, &self.first) {
             return None;
