@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::rc::{Rc, Weak};
 
 pub struct Heap<T> {
@@ -21,6 +21,10 @@ impl<T> Heap<T> {
         }
     }
 
+    fn get_min(&self) -> Option<Rc<Node<T>>> {
+        Node::from_borrowed_option_rc(&self.min)
+    }
+
     pub fn insert(&mut self, key: i32, value: T) -> Weak<Node<T>> {
         self.n += 1;
         self.trees += 1;
@@ -31,7 +35,7 @@ impl<T> Heap<T> {
         self.min = if let Some(ref min) = self.min {
             Node::concatenate(Rc::clone(min), Rc::clone(&tmp_node));
 
-            if *tmp_node.key.borrow() < *min.key.borrow() {
+            if tmp_node.get_key() < min.get_key() {
                 Some(tmp_node)
             } else {
                 Some(Rc::clone(min))
@@ -44,21 +48,17 @@ impl<T> Heap<T> {
     }
 
     pub fn delete_min(&mut self) {
-        self.min = if let Some(ref min) = self.min {
-            let min = Rc::clone(min);
+        self.min = if let Some(min) = self.get_min() {
             self.n -= 1;
             self.trees -= 1;
-            self.trees += *min.rank.borrow();
+            self.trees += min.get_rank();
 
-            let left = match *min.left.borrow() {
-                Some(ref left) => Rc::clone(left),
+            let left = match min.get_left() {
+                Some(left) => left,
                 None => unreachable!(),
             };
 
-            let child = match *min.child.borrow() {
-                Some(ref child) => Some(Rc::clone(child)),
-                None => None,
-            };
+            let child = min.get_child();
 
             Node::remove(Rc::clone(&min));
             min.clear_child();
@@ -81,13 +81,7 @@ impl<T> Heap<T> {
             None
         };
 
-        let min = if let Some(ref min) = self.min {
-            Some(Rc::clone(min))
-        } else {
-            None
-        };
-
-        if let Some(min) = min {
+        if let Some(min) = self.get_min() {
             let mut nc = NodeConsolidator::new(self.trees);
             nc.consolidate(min);
             self.trees = nc.trees;
@@ -96,17 +90,15 @@ impl<T> Heap<T> {
     }
 
     pub fn print(&self) {
-        if let Some(ref min) = self.min {
-            let rc = Rc::clone(min);
-
-            for node in NodeIterator::new(rc) {
+        if let Some(min) = self.get_min() {
+            for node in NodeIterator::new(min) {
                 node.print(0);
             }
         }
     }
 
     pub fn reduce_key(&mut self, node: Rc<Node<T>>, key: i32) {
-        if key < *node.key.borrow() {
+        if key < node.get_key() {
             node.set_key(key);
 
             self.prune(node);
@@ -119,21 +111,9 @@ impl<T> Heap<T> {
     }
 
     pub fn union(&mut self, mut heap: Heap<T>) {
-        let foreign_min = if let Some(ref min) = heap.min {
-            Some(Rc::clone(min))
-        } else {
-            None
-        };
-
-        let local_min = if let Some(ref min) = self.min {
-            Some(Rc::clone(min))
-        } else {
-            None
-        };
-
-        if let Some(f_min) = foreign_min {
-            if let Some(l_min) = local_min {
-                if *f_min.key.borrow() < *l_min.key.borrow() {
+        if let Some(f_min) = heap.get_min() {
+            if let Some(l_min) = self.get_min() {
+                if f_min.get_key() < l_min.get_key() {
                     self.min = Some(Rc::clone(&f_min));
                 }
 
@@ -146,14 +126,8 @@ impl<T> Heap<T> {
     }
 
     fn prune(&mut self, node: Rc<Node<T>>) {
-        let parent = if let Some(ref parent) = *node.parent.borrow() {
-            Weak::upgrade(parent)
-        } else {
-            None
-        };
-
-        if let Some(parent) = parent {
-            if *parent.key.borrow() < *node.key.borrow() {
+        if let Some(parent) = node.get_parent() {
+            if parent.get_key() < node.get_key() {
                 return;
             }
 
@@ -162,17 +136,11 @@ impl<T> Heap<T> {
                 self.marks -= 1;
             }
 
-            let child = if let Some(ref child) = *parent.child.borrow() {
-                Some(Rc::clone(child))
-            } else {
-                None
-            };
-
-            if let Some(child) = child {
+            if let Some(child) = parent.get_child() {
                 if Rc::ptr_eq(&child, &node) {
-                    if *parent.rank.borrow() > 1 {
-                        if let Some(ref left) = *node.left.borrow() {
-                            parent.set_child(Rc::clone(left));
+                    if parent.get_rank() > 1 {
+                        if let Some(left) = node.get_left() {
+                            parent.set_child(left);
                         }
                     } else {
                         parent.clear_child();
@@ -181,17 +149,11 @@ impl<T> Heap<T> {
 
                 parent.decrement_rank();
 
-                let min = if let Some(ref min) = self.min {
-                    Some(Rc::clone(min))
-                } else {
-                    None
-                };
-
-                if let Some(min) = min {
+                if let Some(min) = self.get_min() {
                     Node::concatenate(Rc::clone(&min), Node::remove(Rc::clone(&node)));
                     self.trees += 1;
 
-                    if *node.key.borrow() < *min.key.borrow() {
+                    if node.get_key() < min.get_key() {
                         self.min = Some(node);
                     }
 
@@ -209,13 +171,7 @@ impl<T> Heap<T> {
 
 impl<T> Drop for Heap<T> {
     fn drop(&mut self) {
-        let min = if let Some(ref min) = self.min {
-            Some(Rc::clone(min))
-        } else {
-            None
-        };
-
-        if let Some(min) = min {
+        if let Some(min) = self.get_min() {
             for node in NodeIterator::new(min) {
                 Node::cleanup(node);
             }
@@ -265,6 +221,10 @@ impl<T> Node<T> {
         *self.key.borrow_mut() = key;
     }
 
+    fn get_rank(&self) -> usize {
+        *self.rank.borrow()
+    }
+
     fn is_marked(&self) -> bool {
         *self.marked.borrow()
     }
@@ -291,46 +251,37 @@ impl<T> Node<T> {
             s.push_str("  ");
         }
         if self.is_marked() {
-            println!("{}{}*:", s, *self.key.borrow());
+            println!("{}{}*:", s, self.get_key());
         } else {
-            println!("{}{}:", s, *self.key.borrow());
+            println!("{}{}:", s, self.get_key());
         }
 
-        if let Some(ref child) = *self.child.borrow() {
-            for node in NodeIterator::new(Rc::clone(child)) {
+        if let Some(child) = self.get_child() {
+            for node in NodeIterator::new(child) {
                 node.print(depth + 1);
             }
         }
     }
 
     fn remove(node: Rc<Node<T>>) -> Rc<Node<T>> {
-        let left = match *node.left.borrow() {
-            Some(ref left) => Rc::clone(left),
+        let left = match node.get_left() {
+            Some(left) => left,
             None => unreachable!(),
         };
 
-        let right = match *node.right.borrow() {
-            Some(ref right) => Weak::clone(right),
+        let right = match node.get_right() {
+            Some(right) => right,
             None => unreachable!(),
         };
 
         if !Rc::ptr_eq(&node, &left) {
-            left.set_right(Weak::clone(&right));
-
-            if let Some(right) = Weak::upgrade(&right) {
-                right.set_left(Rc::clone(&left));
-            }
+            left.set_right(Rc::downgrade(&right));
+            right.set_left(Rc::clone(&left));
         }
 
-        let parent = if let Some(ref parent) = *node.parent.borrow() {
-            Weak::upgrade(parent)
-        } else {
-            None
-        };
-
-        if let Some(parent) = parent {
-            if let Some(ref child) = *parent.child.borrow() {
-                if Rc::ptr_eq(&node, child) {
+        if let Some(parent) = node.get_parent() {
+            if let Some(child) = parent.get_child() {
+                if Rc::ptr_eq(&node, &child) {
                     if Rc::ptr_eq(&node, &left) {
                         parent.clear_child();
                     } else {
@@ -347,13 +298,7 @@ impl<T> Node<T> {
     }
 
     fn cleanup(node: Rc<Self>) {
-        let child = if let Some(ref child) = *node.child.borrow() {
-            Some(Rc::clone(child))
-        } else {
-            None
-        };
-
-        if let Some(child) = child {
+        if let Some(child) = node.get_child() {
             for node in NodeIterator::new(child) {
                 Node::cleanup(node);
             }
@@ -367,6 +312,10 @@ impl<T> Node<T> {
         *self.left.borrow_mut() = Some(node);
     }
 
+    fn get_left(&self) -> Option<Rc<Self>> {
+        Node::from_ref_option_rc(self.left.borrow())
+    }
+
     fn clear_left(&self) {
         *self.left.borrow_mut() = None;
     }
@@ -375,40 +324,70 @@ impl<T> Node<T> {
         *self.right.borrow_mut() = Some(node);
     }
 
+    fn get_right(&self) -> Option<Rc<Self>> {
+        Node::from_ref_option_weak(self.right.borrow())
+    }
+
     fn set_parent(&self, node: Weak<Self>) {
         *self.parent.borrow_mut() = Some(node);
+    }
+
+    fn get_parent(&self) -> Option<Rc<Self>> {
+        Node::from_ref_option_weak(self.parent.borrow())
     }
 
     fn set_child(&self, node: Rc<Self>) {
         *self.child.borrow_mut() = Some(node);
     }
 
+    fn get_child(&self) -> Option<Rc<Self>> {
+        Node::from_ref_option_rc(self.child.borrow())
+    }
+
     fn clear_child(&self) {
         *self.child.borrow_mut() = None;
+    }
+
+    fn from_ref_option_rc(node: Ref<Option<Rc<Self>>>) -> Option<Rc<Self>> {
+        if let Some(ref n) = *node {
+            Some(Rc::clone(n))
+        } else {
+            None
+        }
+    }
+
+    fn from_borrowed_option_rc(node: &Option<Rc<Self>>) -> Option<Rc<Self>> {
+        if let &Some(ref n) = node {
+            Some(Rc::clone(n))
+        } else {
+            None
+        }
+    }
+
+    fn from_ref_option_weak(node: Ref<Option<Weak<Self>>>) -> Option<Rc<Self>> {
+        if let Some(ref n) = *node {
+            Weak::upgrade(n)
+        } else {
+            None
+        }
     }
 
     fn concatenate(node1: Rc<Self>, node2: Rc<Self>) {
         let node1_weak = Rc::downgrade(&node1);
 
-        let node2_left = match *node2.left.borrow() {
-            Some(ref left) => Rc::clone(left),
+        let node2_left = match node2.get_left() {
+            Some(left) => left,
             None => unreachable!(),
         };
 
-        let node1_left = match *node1.left.borrow() {
-            Some(ref left) => Rc::clone(left),
+        let node1_left = match node1.get_left() {
+            Some(left) => left,
             None => unreachable!(),
         };
 
-        let n2parent = if let Some(ref parent) = *node2.parent.borrow() {
-            Weak::upgrade(parent)
-        } else {
-            None
-        };
-
-        if let Some(parent) = n2parent {
-            if let Some(ref child) = *parent.child.borrow() {
-                if Rc::ptr_eq(&node2, child) {
+        if let Some(parent) = node2.get_parent() {
+            if let Some(child) = parent.get_child() {
+                if Rc::ptr_eq(&node2, &child) {
                     parent.clear_child();
                 }
             }
@@ -437,7 +416,7 @@ impl<T> Node<T> {
         let mut min_node = Rc::clone(&node);
 
         for node in NodeIterator::new(node) {
-            if *node.key.borrow() < *min_node.key.borrow() {
+            if node.get_key() < min_node.get_key() {
                 min_node = Rc::clone(&node);
             }
         }
@@ -466,9 +445,7 @@ impl<T> NodeConsolidator<T> {
             return;
         }
 
-        // println!("Checking {} with rank {}", node.key, *node.rank.borrow());
-
-        let rank = *node.rank.borrow();
+        let rank = node.get_rank();
 
         let node2 = Rc::clone(&node);
 
@@ -484,7 +461,7 @@ impl<T> NodeConsolidator<T> {
         };
 
         if let Some(ranked_node) = ranked_node {
-            let node = if *node.key.borrow() < *ranked_node.key.borrow() {
+            let node = if node.get_key() < ranked_node.get_key() {
                 self.merge_nodes(node2, ranked_node)
             } else {
                 self.merge_nodes(ranked_node, node2)
@@ -492,53 +469,38 @@ impl<T> NodeConsolidator<T> {
 
             self.consolidate(node);
         } else {
-            self.ranks.insert(*node.rank.borrow(), Rc::clone(&node));
+            self.ranks.insert(node.get_rank(), Rc::clone(&node));
         }
 
-        let right = if let Some(ref right) = *node.right.borrow() {
-            Weak::upgrade(right)
-        } else {
-            None
-        };
-
-        if let Some(right) = right {
+        if let Some(right) = node.get_right() {
             self.consolidate(right);
         }
     }
 
     fn merge_nodes(&mut self, lesser_node: Rc<Node<T>>, greater_node: Rc<Node<T>>) -> Rc<Node<T>> {
-        // println!("Making {} child of {}", greater_node.key, lesser_node.key);
         self.trees -= 1;
 
-        if let Some(ref parent) = *greater_node.parent.borrow() {
-            if let Some(parent) = Weak::upgrade(parent) {
-                parent.decrement_rank();
-            }
+        if let Some(parent) = greater_node.get_parent() {
+            parent.decrement_rank();
         }
-
-        let child = if let Some(ref child) = *lesser_node.child.borrow() {
-            Some(Rc::clone(child))
-        } else {
-            None
-        };
 
         let gn2 = Rc::clone(&greater_node);
         Node::remove(gn2);
 
-        if let Some(child) = child {
+        if let Some(child) = lesser_node.get_child() {
             Node::concatenate(child, greater_node);
         } else {
             greater_node.set_parent(Rc::downgrade(&lesser_node));
             lesser_node.set_child(greater_node);
         }
 
-        let rank = *lesser_node.rank.borrow();
+        let rank = lesser_node.get_rank();
         self.ranks.remove(&rank);
 
         lesser_node.increment_rank();
 
-        if *lesser_node.rank.borrow() > self.rank {
-            self.rank = *lesser_node.rank.borrow();
+        if lesser_node.get_rank() > self.rank {
+            self.rank = lesser_node.get_rank();
         }
 
         lesser_node
@@ -576,11 +538,7 @@ impl<T> Iterator for NodeIterator<T> {
             self.first_seen = true;
         }
 
-        if let Some(ref left) = *current.left.borrow() {
-            self.current = Some(Rc::clone(left));
-        } else {
-            self.current = None;
-        }
+        self.current = current.get_left();
 
         Some(current)
     }
